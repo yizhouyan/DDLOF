@@ -14,9 +14,17 @@ public class Cal_chisquare {
 	 * @version Sep 28, 2015
 	 */
 	
-	public static double Chi_square(int[] randomNums, int r)
+	public static double Chi_square(int[] randomNums)
 	{
-		double n_r = (double)randomNums.length / r*1.0;
+	//	int maxFreq = 0;
+		int sumFreq = 0;
+		for(int i = 0; i< randomNums.length; i++){
+//			if(randomNums[i]>maxFreq)
+//				maxFreq = randomNums[i];
+			sumFreq += randomNums[i];
+		}
+		double n_r = sumFreq/randomNums.length;
+		//double n_r = (double)randomNums.length / r*1.0;
 		double chiSquare = 0;
 
 		for(int i = 0; i < randomNums.length; i++){
@@ -63,7 +71,7 @@ public class Cal_chisquare {
 			if(intdata[i]>max_data)
 				max_data = intdata[i];
 		}
-		return Chi_square(intdata,max_data);
+		return Chi_square(intdata);
 	}
 	
 	/**unit test of Cal_Chisquare*/

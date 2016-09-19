@@ -1,9 +1,7 @@
 package metricspace;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Vector;
 
 @SuppressWarnings("rawtypes")
 public class MetricObject implements Comparable {
@@ -19,6 +17,8 @@ public class MetricObject implements Comparable {
 	private String knnsInString = "";
 	private float nearestNeighborDist = Float.MAX_VALUE;
 	private boolean canPrune = false;
+	private float lrd = 0;
+	private float lof = 0;
 	
 	public boolean isCanPrune() {
 		return canPrune;
@@ -35,8 +35,7 @@ public class MetricObject implements Comparable {
 	public void setNearestNeighborDist(float nearestNeighborDist) {
 		this.nearestNeighborDist = nearestNeighborDist;
 	}
-	private float lrd = 0;
-	private float lof = 0;
+	
 	
 	public float getLrd() {
 		return lrd;
@@ -196,10 +195,6 @@ public class MetricObject implements Comparable {
 
 	public void setKnnsInString(String knnsInString) {
 		this.knnsInString = knnsInString;
-	}
-	@SuppressWarnings("unchecked")
-	public static void main(String[] args) {
-		
 	}
 	
 }

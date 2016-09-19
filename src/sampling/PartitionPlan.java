@@ -17,7 +17,7 @@ public class PartitionPlan {
 	public Hashtable<String, Integer> dataPoints;
 
 	/** show the number of buckets for each dimension */
-	private int[] numBuckets_dim;
+	private int numBuckets_dim;
 
 	/** number of dimensions */
 	private int num_dim;
@@ -66,12 +66,11 @@ public class PartitionPlan {
 	 * @param map_num
 	 * @param smallDomain
 	 */
-	public void setupPartitionPlan(int num_dim, int num_data, int[] numBuckets_dim, double[] startDomain,
+	public void setupPartitionPlan(int num_dim, int num_data, int numBuckets_dim, double[] startDomain,
 			double[] endDomain, int map_num, int smallDomain) {
 		dataPoints = new Hashtable<String, Integer>();
 		this.num_dim = num_dim;
 		this.num_data = num_data;
-		this.numBuckets_dim = new int[numBuckets_dim.length];
 		this.numBuckets_dim = numBuckets_dim;
 		this.startDomain = new double[num_dim];
 		this.startDomain = startDomain;
@@ -100,11 +99,12 @@ public class PartitionPlan {
 	}
 
 	public PartitionPlan[] seperatePartitions(int byDim, int K) {
-		PartitionPlan[] newPartitions = new PartitionPlan[numBuckets_dim[byDim]];
-		for (int i = 0; i < numBuckets_dim[byDim]; i++) {
+		PartitionPlan[] newPartitions = new PartitionPlan[numBuckets_dim];
+		for (int i = 0; i < numBuckets_dim; i++) {
 			newPartitions[i] = new PartitionPlan();
 		}
-		int each_part_num = num_data / numBuckets_dim[byDim];
+		int each_part_num = num_data / numBuckets_dim;
+		each_part_num = Math.max(K, each_part_num);
 		int[] frequencies = new int[map_num];
 
 		// load data into frequency
@@ -119,7 +119,7 @@ public class PartitionPlan {
 
 		int index_i = 0;
 		int i = 0;
-		for (i = 0; i < numBuckets_dim[byDim] - 1; i++) {
+		for (i = 0; i < numBuckets_dim - 1; i++) {
 			int tempsum = 0;
 			double new_start_point = index_i * smallDomain;
 			// System.out.println(index_i+"-----");
@@ -136,7 +136,7 @@ public class PartitionPlan {
 				}
 			}
 			// System.out.println(index_i+"&----");
-			if ((checkIfElements == false) && (tempsum == 0)) {
+			if ((checkIfElements == false) && (tempsum == 0 )) {
 				break;
 			}
 
@@ -247,9 +247,8 @@ public class PartitionPlan {
 		}
 		System.out.println("number of dimensions" + this.num_dim);
 		System.out.println("Number of desired buckets per dimension: ");
-		for (int i = 0; i < numBuckets_dim.length; i++) {
-			System.out.print(numBuckets_dim[i] + "        ");
-		}
+		
+			System.out.print(numBuckets_dim + "        ");
 		System.out.println("");
 
 		System.out.println("Start points and end points: ");
