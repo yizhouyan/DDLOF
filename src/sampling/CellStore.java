@@ -12,6 +12,9 @@ public class CellStore{
 		this.cellStoreId = cellStoreId;
 	}
 
+	public CellStore(){
+		
+	}
 	public String printCellStoreBasic(){
 		String str = "";
 		str += cellStoreId+",";
@@ -27,5 +30,55 @@ public class CellStore{
 			str += keyiter+",";
 		}
 		return str.substring(0,str.length()-1);
+	}
+	public static int ComputeCellStoreId(int [] data, int dim, int numCellPerDim){
+		if(data.length != dim)
+			return -1;
+		int cellId = 0;
+		for(int i = 0; i< dim; i++){
+			cellId = cellId + (int) (data[i] * Math.pow(numCellPerDim, i));
+		}
+		return cellId;
+	}
+	public static int ComputeCellStoreId(String dataString, int dim, int numCellPerDim){
+		String [] data = dataString.split(",");
+		if(data.length != dim)
+			return -1;
+		int cellId = 0;
+		for(int i = 0; i< dim; i++){
+			cellId = cellId + (int) (Double.parseDouble(data[i]) * Math.pow(numCellPerDim, i));
+		}
+		return cellId;
+	}
+	
+	public static int ComputeCellStoreId(float [] data, int dim, int numCellPerDim, int smallRange){
+		if(data.length != dim)
+			return -1;
+		int cellId = 0;
+		for(int i = 0; i< dim; i++){
+			int tempIndex = (int) Math.floor(data[i]/smallRange);
+			cellId = cellId + (int) (tempIndex * Math.pow(numCellPerDim, i));
+		}
+		return cellId;
+	}
+	public int [] GenerateCellCoordinate(int cellIdNum, int dim, int numCellPerDim){
+		int []cellCoorIndex = new int [dim];
+		for(int i = dim-1 ; i >=0 ;i--){
+			int divider = (int) Math.pow(numCellPerDim, i);
+			int countPerDim = cellIdNum/divider;
+			cellCoorIndex[i] = countPerDim;
+			cellIdNum = cellIdNum - countPerDim * divider;
+		}
+		return cellCoorIndex;
+	}
+	public static void main(String[] args) throws Exception {
+		CellStore cs = new CellStore();
+		int [] data = {9,9,9,9,5};
+		System.out.println(cs.ComputeCellStoreId(data, 5, 10));
+		
+		int [] secondData = cs.GenerateCellCoordinate(59999, 5, 10);
+		for(int i = 0 ;i < 5;i++){
+			System.out.println(secondData[i]);
+		}
 	}
 }
