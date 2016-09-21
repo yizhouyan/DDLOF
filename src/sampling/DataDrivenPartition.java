@@ -93,7 +93,7 @@ public class DataDrivenPartition {
 		public static int cell_num = 501;
 
 		/** The domains. (set by user) */
-		private static double[] domains;
+		private static float[] domains;
 
 		/** size of each small buckets */
 		private static int smallRange;
@@ -107,7 +107,7 @@ public class DataDrivenPartition {
 		 * block list, which saves each block's info including start & end
 		 * positions on each dimension. print for speed up "mapping"
 		 */
-		private static double[][] partition_store;
+		private static float[][] partition_store;
 		/** the total usage of the block list (partition store) */
 		private static int indexForPartitionStore = 0;
 		/** in order to build hash to speed up mapping process */
@@ -155,67 +155,6 @@ public class DataDrivenPartition {
 			return sorted_dim;
 		}
 
-		// public void setupIndexes() {
-		// double previous_dim_index = partition_store[0][0];
-		// int start_from = 0;
-		// int end_to = 0;
-		// for (int i = 0; i < indexForPartitionStore; i++) {
-		// if (partition_store[i][0] == previous_dim_index) {
-		// end_to = i;
-		// } else {
-		// start_end_points.put(previous_dim_index, new StartAndEnd(start_from,
-		// end_to));
-		// previous_dim_index = partition_store[i][0];
-		// start_from = i;
-		// end_to = i;
-		// }
-		// }
-		// start_end_points.put(previous_dim_index, new StartAndEnd(start_from,
-		// end_to));
-		// }
-
-		// public int compareTwoNumbers(double[] aaa, double[] bbb) {
-		// for (int i = 0; i < num_dims; i++) {
-		// if (aaa[i] > bbb[i])
-		// return 1;
-		// else if (aaa[i] < bbb[i])
-		// return -1;
-		// else
-		// continue;
-		// }
-		// return 0;
-		// }
-		//
-		// public void sortBlocklist() {
-		// int len = indexForPartitionStore;
-		// for (int i = 0; i < len; i++) {
-		// for (int j = i + 1; j < len; j++) {
-		// double[] temp = new double[num_dims * 2];
-		// if (compareTwoNumbers(partition_store[i], partition_store[j]) > 0) {
-		// temp = partition_store[j];
-		// partition_store[j] = partition_store[i];
-		// partition_store[i] = temp;
-		//
-		// int tempSize = partition_size[j];
-		// partition_size[j] = partition_size[i];
-		// partition_size[i] = tempSize;
-		// }
-		// }
-		// }
-		// }
-
-		// public int markEndPoints(double crd) {
-		// int start_end = indexForPartitionStore;
-		// double for_end = crd;
-		// for (Iterator itr = start_end_points.keySet().iterator();
-		// itr.hasNext();) {
-		// Double keyiter = (Double) itr.next();
-		// if ((keyiter > for_end) &&
-		// ((start_end_points.get(keyiter).start_point) < start_end))
-		// start_end = start_end_points.get(keyiter).start_point;
-		// }
-		// return start_end;
-		// }
 
 		public void setup(Context context) {
 			mos = new MultipleOutputs(context);
@@ -223,12 +162,12 @@ public class DataDrivenPartition {
 			Configuration conf = context.getConfiguration();
 			num_dims = conf.getInt(SQConfig.strDimExpression, 2);
 			cell_num = conf.getInt(SQConfig.strNumOfSmallCells, 501);
-			domains = new double[2];
-			domains[0] = conf.getDouble(SQConfig.strDomainMin, 0.0);
-			domains[1] = conf.getDouble(SQConfig.strDomainMax, 10001);
+			domains = new float[2];
+			domains[0] = conf.getFloat(SQConfig.strDomainMin, 0.0f);
+			domains[1] = conf.getFloat(SQConfig.strDomainMax, 10001.0f);
 			smallRange = (int) Math.ceil((domains[1] - domains[0]) / cell_num);
 			di_numBuckets = conf.getInt(SQConfig.strNumOfPartitions, 2);
-			partition_store = new double[(int) Math.pow(di_numBuckets, num_dims) + 1][num_dims * 2];
+			partition_store = new float[(int) Math.pow(di_numBuckets, num_dims) + 1][num_dims * 2];
 			partition_size = new int[(int) Math.pow(di_numBuckets, num_dims) + 1];
 			start_end_points = new Hashtable<Double, StartAndEnd>();
 		}
@@ -253,7 +192,7 @@ public class DataDrivenPartition {
 					String newLine = "";
 					// rescale data and save to hashtable
 					for (int i = 0; i < num_dims; i++) {
-						double tempDataPerDim = Double.valueOf(line.split(",")[i + 1]);
+						float tempDataPerDim = Float.valueOf(line.split(",")[i + 1]);
 						int indexDataPerDim = (int) (Math.floor(tempDataPerDim / smallRange));
 						frequency[i][indexDataPerDim]++;
 						newLine = newLine + indexDataPerDim * smallRange + ",";
@@ -280,8 +219,8 @@ public class DataDrivenPartition {
 				Queue<PartitionPlan> queueOfPartition = new LinkedList<PartitionPlan>();
 
 				// create object PartitionPlan and load all data into this plan
-				double[] startOfRange = new double[num_dims];
-				double[] endsOfRange = new double[num_dims];
+				float[] startOfRange = new float[num_dims];
+				float[] endsOfRange = new float[num_dims];
 				for (int i = 0; i < num_dims; i++) {
 					startOfRange[i] = domains[0];
 					endsOfRange[i] = domains[1];
@@ -327,7 +266,7 @@ public class DataDrivenPartition {
 								String[] sub_splits = outputStr.split(",");
 								// System.out.println(outputStr);
 								for (int yy = 0; yy < num_dims * 2; yy++) {
-									partition_store[indexForPartitionStore][yy] = Double.valueOf(sub_splits[yy]);
+									partition_store[indexForPartitionStore][yy] = Float.valueOf(sub_splits[yy]);
 								}
 								partition_size[indexForPartitionStore] = needPartition.getNumData();
 								indexForPartitionStore++;
@@ -344,7 +283,7 @@ public class DataDrivenPartition {
 									if (outputStr.length() >= num_dims * 2) {
 										String[] sub_splits = outputStr.split(",");
 										for (int yy = 0; yy < num_dims * 2; yy++) {
-											partition_store[indexForPartitionStore][yy] = Double
+											partition_store[indexForPartitionStore][yy] = Float
 													.valueOf(sub_splits[yy]);
 										}
 										partition_size[indexForPartitionStore] = PPs[k].getNumData();

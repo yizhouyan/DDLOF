@@ -26,10 +26,10 @@ public class PartitionPlan {
 	private int num_data;
 
 	/** start of different dimensions of domain */
-	private double[] startDomain;
+	private float[] startDomain;
 
 	/** end of different dimensions of domain */
-	private double[] endDomain;
+	private float[] endDomain;
 
 	/**
 	 * number of maps: when come with a node, map to a range (divide the domain
@@ -66,15 +66,15 @@ public class PartitionPlan {
 	 * @param map_num
 	 * @param smallDomain
 	 */
-	public void setupPartitionPlan(int num_dim, int num_data, int numBuckets_dim, double[] startDomain,
-			double[] endDomain, int map_num, int smallDomain) {
+	public void setupPartitionPlan(int num_dim, int num_data, int numBuckets_dim, float[] startDomain,
+			float[] endDomain, int map_num, int smallDomain) {
 		dataPoints = new Hashtable<String, Integer>();
 		this.num_dim = num_dim;
 		this.num_data = num_data;
 		this.numBuckets_dim = numBuckets_dim;
-		this.startDomain = new double[num_dim];
+		this.startDomain = new float[num_dim];
 		this.startDomain = startDomain;
-		this.endDomain = new double[num_dim];
+		this.endDomain = new float[num_dim];
 		this.endDomain = endDomain;
 		this.map_num = map_num;
 		this.smallDomain = smallDomain;
@@ -110,7 +110,7 @@ public class PartitionPlan {
 		// load data into frequency
 		for (Iterator itr = dataPoints.keySet().iterator(); itr.hasNext();) {
 			String key = (String) itr.next();
-			int indexOfKey = (int) Math.floor(Double.valueOf(key.split(",")[byDim]) / smallDomain);
+			int indexOfKey = (int) Math.floor(Float.valueOf(key.split(",")[byDim]) / smallDomain);
 			int value = (int) dataPoints.get(key);
 			// System.out.println("Index of key : " +indexOfKey + "Small Domain:
 			// "+ smallDomain );
@@ -121,7 +121,7 @@ public class PartitionPlan {
 		int i = 0;
 		for (i = 0; i < numBuckets_dim - 1; i++) {
 			int tempsum = 0;
-			double new_start_point = index_i * smallDomain;
+			float new_start_point = index_i * smallDomain;
 			// System.out.println(index_i+"-----");
 			boolean checkIfElements = true;
 			while (tempsum < each_part_num) {
@@ -141,7 +141,7 @@ public class PartitionPlan {
 			}
 
 			// System.out.println("index_i :"+ index_i);
-			double new_end_point = index_i * smallDomain;
+			float new_end_point = index_i * smallDomain;
 
 			// System.out.println(new_start_point + " "+ new_end_point);
 
@@ -151,14 +151,14 @@ public class PartitionPlan {
 			for (Iterator itr = dataPoints.keySet().iterator(); itr.hasNext();) {
 				String key = (String) itr.next();
 				int value = (int) dataPoints.get(key);
-				if ((Double.valueOf(key.split(",")[byDim]) >= new_start_point)
-						&& (Double.valueOf(key.split(",")[byDim]) < new_end_point)) {
+				if ((Float.valueOf(key.split(",")[byDim]) >= new_start_point)
+						&& (Float.valueOf(key.split(",")[byDim]) < new_end_point)) {
 					newDataPoints.put(key, value);
 					new_num_data += value;
 				}
 			}
-			double[] newstartDomain = new double[num_dim];
-			double[] newendDomain = new double[num_dim];
+			float[] newstartDomain = new float[num_dim];
+			float[] newendDomain = new float[num_dim];
 			for (int j = 0; j < num_dim; j++) {
 				newstartDomain[j] = startDomain[j];
 				newendDomain[j] = endDomain[j];
@@ -175,13 +175,13 @@ public class PartitionPlan {
 		// setup the final partition which startpoint = index_i and endpoint =
 		// org_endpoint
 
-		double[] newstartDomain = new double[num_dim];
-		double[] newendDomain = new double[num_dim];
+		float[] newstartDomain = new float[num_dim];
+		float[] newendDomain = new float[num_dim];
 		for (int j = 0; j < num_dim; j++) {
 			newstartDomain[j] = startDomain[j];
 			newendDomain[j] = endDomain[j];
 		}
-		double new_start_point = index_i * smallDomain;
+		float new_start_point = index_i * smallDomain;
 		// System.out.println(new_start_point+"________");
 		newstartDomain[byDim] = new_start_point;
 		
@@ -192,8 +192,8 @@ public class PartitionPlan {
 		for (Iterator itr = dataPoints.keySet().iterator(); itr.hasNext();) {
 			String key = (String) itr.next();
 			int value = (int) dataPoints.get(key);
-			if ((Double.valueOf(key.split(",")[byDim]) >= new_start_point)
-					&& (Double.valueOf(key.split(",")[byDim]) < endDomain[byDim])) {
+			if ((Float.valueOf(key.split(",")[byDim]) >= new_start_point)
+					&& (Float.valueOf(key.split(",")[byDim]) < endDomain[byDim])) {
 				newDataPoints.put(key, value);
 				new_num_data += value;
 			}

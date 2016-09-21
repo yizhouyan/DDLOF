@@ -19,6 +19,7 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
@@ -40,7 +41,6 @@ import metricspace.Record;
 import sampling.CellStore;
 import util.SQConfig;
 
-
 public class FindKNNSupport {
 	/**
 	 * default Map class.
@@ -50,9 +50,9 @@ public class FindKNNSupport {
 	 */
 
 	/** number of object pairs to be computed */
-	static enum Counters {
-		ComputedKnns, UncomputedKnns
-	}
+	// static enum Counters {
+	// ComputedKnns, UncomputedKnns
+	// }
 	public static class KNNFinderMapper extends Mapper<LongWritable, Text, IntWritable, Text> {
 		/**
 		 * The dimension of data (set by user, now only support dimension of 2,
@@ -66,37 +66,36 @@ public class FindKNNSupport {
 		public static int cell_num = 501;
 
 		/** The domains. (set by user) */
-		private static double[][] domains;
+		private static float[] domains;
 		/** size of each small buckets */
 		private static int smallRange;
 		/**
 		 * block list, which saves each block's info including start & end
 		 * positions on each dimension. print for speed up "mapping"
 		 */
-		private static double[][] partition_store;
+		private static float[][] partition_store;
 		/** save each small buckets. in order to speed up mapping process */
-		private static CellStore[][] cell_store;
+		private static CellStore[] cell_store;
 		/**
 		 * Number of desired partitions in each dimension (set by user), for
 		 * Data Driven partition
 		 */
-		private static int[] di_numBuckets;
+		private static int di_numBuckets;
 
 		protected void setup(Context context) throws IOException, InterruptedException {
 			Configuration conf = context.getConfiguration();
 			/** get configuration from file */
 			num_dims = conf.getInt(SQConfig.strDimExpression, 2);
 			cell_num = conf.getInt(SQConfig.strNumOfSmallCells, 501);
-			domains = new double[num_dims][2];
-			domains[0][0] = domains[1][0] = conf.getDouble(SQConfig.strDomainMin, 0.0);
-			domains[0][1] = domains[1][1] = conf.getDouble(SQConfig.strDomainMax, 10001);
-			smallRange = (int) Math.ceil((domains[0][1] - domains[0][0]) / cell_num);
-			cell_store = new CellStore[cell_num][cell_num];
-			di_numBuckets = new int[num_dims];
-			for (int i = 0; i < num_dims; i++) {
-				di_numBuckets[i] = conf.getInt(SQConfig.strNumOfPartitions, 2);
-			}
-			partition_store = new double[di_numBuckets[0] * di_numBuckets[1] + 1][num_dims * 2];
+			domains = new float[2];
+			domains[0] = conf.getFloat(SQConfig.strDomainMin, 0.0f);
+			domains[1] = conf.getFloat(SQConfig.strDomainMax, 10001.0f);
+			smallRange = (int) Math.ceil((domains[1] - domains[0]) / cell_num);
+			cell_store = new CellStore[(int) Math.pow(cell_num, num_dims)];
+			di_numBuckets = conf.getInt(SQConfig.strNumOfPartitions, 2);
+
+			partition_store = new float[(int) Math.pow(di_numBuckets, num_dims)][num_dims * 2];
+
 			/** parse files in the cache */
 			try {
 				URI[] cacheFiles = context.getCacheArchives();
@@ -112,7 +111,7 @@ public class FindKNNSupport {
 					FileStatus[] stats = fs.listStatus(new Path(filename));
 					for (int i = 0; i < stats.length; ++i) {
 						if (!stats[i].isDirectory() && stats[i].getPath().toString().contains("pp")) {
-//							System.out.println("Reading partition plan from " + stats[i].getPath().toString());
+							System.out.println("Reading partition plan from " + stats[i].getPath().toString());
 							FSDataInputStream currentStream;
 							BufferedReader currentReader;
 							currentStream = fs.open(stats[i].getPath());
@@ -120,15 +119,14 @@ public class FindKNNSupport {
 							String line;
 							while ((line = currentReader.readLine()) != null) {
 								/** parse line */
-
 								String[] splitsStr = line.split(SQConfig.sepStrForRecord);
 								int tempid = Integer.parseInt(splitsStr[0]);
 								for (int j = 0; j < num_dims * 2; j++) {
-									partition_store[tempid][j] = Double.parseDouble(splitsStr[j + 1]);
+									partition_store[tempid][j] = Float.parseFloat(splitsStr[j + 1]);
 								}
 							}
 						} else if (!stats[i].isDirectory() && stats[i].getPath().toString().contains("part")) {
-//							System.out.println("Reading cells for partitions from " + stats[i].getPath().toString());
+							System.out.println("Reading cells for partitions from " + stats[i].getPath().toString());
 							FSDataInputStream currentStream;
 							BufferedReader currentReader;
 							currentStream = fs.open(stats[i].getPath());
@@ -137,12 +135,10 @@ public class FindKNNSupport {
 							while ((line = currentReader.readLine()) != null) {
 								/** parse line */
 								String[] items = line.split(SQConfig.sepStrForRecord);
-								if (items.length == 6) {
-									int x_1 = (int) (Double.valueOf(items[0]) / smallRange);
-									int y_1 = (int) (Double.valueOf(items[2]) / smallRange);
-									cell_store[x_1][y_1] = new CellStore(x_1 * smallRange, (x_1 + 1) * smallRange,
-											(y_1) * smallRange, (y_1 + 1) * smallRange);
-									cell_store[x_1][y_1].core_partition_id = Integer.valueOf(items[4].substring(2));
+								if (items.length == 2) {
+									int cellId = Integer.valueOf(items[0]);
+									int corePartitionId = Integer.valueOf(items[1].substring(2));
+									cell_store[cellId] = new CellStore(cellId, corePartitionId);
 								}
 							}
 						} // end else if
@@ -156,17 +152,19 @@ public class FindKNNSupport {
 
 		public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
 			// Variables
-			double[] crds = new double[num_dims]; // coordinates of one input
-													// data
+			float[] crds = new float[num_dims];
+			String[] splitStr = value.toString().split(SQConfig.sepStrForRecord);
 			// parse raw input data into coordinates/crds
 			for (int i = 1; i < num_dims + 1; i++) {
-				crds[i - 1] = Double.parseDouble(value.toString().split(SQConfig.sepStrForRecord)[i]);
+				crds[i - 1] = Float.parseFloat(splitStr[i]);
 			}
-			// find which cell the point in
-			int x_cellstore = (int) (Math.floor(crds[0] / smallRange));
-			int y_cellstore = (int) (Math.floor(crds[1] / smallRange));
-			// partition id = core area partition id
-			int blk_id = cell_store[x_cellstore][y_cellstore].core_partition_id;
+			int cell_id = CellStore.ComputeCellStoreId(crds, num_dims, cell_num, smallRange);
+			if (cell_id < 0)
+				return;
+
+			int blk_id = cell_store[cell_id].core_partition_id;
+			if (blk_id < 0)
+				return;
 			context.write(new IntWritable(blk_id), value);
 		}
 	}
@@ -182,7 +180,7 @@ public class FindKNNSupport {
 		 */
 		private static int num_dims = 2;
 		/** The domains. (set by user) */
-		private static float[][] domains;
+		private static float[] domains;
 		/**
 		 * block list, which saves each block's info including start & end
 		 * positions on each dimension. print for speed up "mapping"
@@ -192,25 +190,23 @@ public class FindKNNSupport {
 		 * Number of desired partitions in each dimension (set by user), for
 		 * Data Driven partition
 		 */
-		private static int[] di_numBuckets;
+		private static int di_numBuckets;
 		private static int K;
 		private IMetricSpace metricSpace = null;
 		private IMetric metric = null;
-		
+
 		private MultipleOutputs mos;
+
 		/**
 		 * get MetricSpace and metric from configuration
 		 * 
 		 * @param conf
 		 * @throws IOException
 		 */
-		private void readMetricAndMetricSpace(Configuration conf)
-				throws IOException {
+		private void readMetricAndMetricSpace(Configuration conf) throws IOException {
 			try {
-				metricSpace = MetricSpaceUtility.getMetricSpace(conf
-						.get(SQConfig.strMetricSpace));
-				metric = MetricSpaceUtility.getMetric(conf
-						.get(SQConfig.strMetric));
+				metricSpace = MetricSpaceUtility.getMetricSpace(conf.get(SQConfig.strMetricSpace));
+				metric = MetricSpaceUtility.getMetric(conf.get(SQConfig.strMetric));
 				metricSpace.setMetric(metric);
 			} catch (InstantiationException e) {
 				throw new IOException("InstantiationException");
@@ -222,20 +218,19 @@ public class FindKNNSupport {
 				throw new IOException("ClassNotFoundException");
 			}
 		}
+
 		public void setup(Context context) throws IOException {
 			mos = new MultipleOutputs(context);
 			Configuration conf = context.getConfiguration();
 			readMetricAndMetricSpace(conf);
 			/** get configuration from file */
 			num_dims = conf.getInt(SQConfig.strDimExpression, 2);
-			domains = new float[num_dims][2];
-			domains[0][0] = domains[1][0] = conf.getFloat(SQConfig.strDomainMin, 0.0f);
-			domains[0][1] = domains[1][1] = conf.getFloat(SQConfig.strDomainMax, 10001.0f);
-			di_numBuckets = new int[num_dims];
-			for (int i = 0; i < num_dims; i++) {
-				di_numBuckets[i] = conf.getInt(SQConfig.strNumOfPartitions, 2);
-			}
-			partition_store = new float[di_numBuckets[0] * di_numBuckets[1] + 1][num_dims * 2];
+			domains = new float[2];
+			domains[0] = conf.getFloat(SQConfig.strDomainMin, 0.0f);
+			domains[1] = conf.getFloat(SQConfig.strDomainMax, 10001.0f);
+			di_numBuckets = conf.getInt(SQConfig.strNumOfPartitions, 2);
+			partition_store = new float[(int) Math.pow(di_numBuckets, num_dims)][num_dims * 2];
+
 			K = Integer.valueOf(conf.get(SQConfig.strK, "1"));
 			/** parse files in the cache */
 			try {
@@ -252,7 +247,7 @@ public class FindKNNSupport {
 					FileStatus[] stats = fs.listStatus(new Path(filename));
 					for (int i = 0; i < stats.length; ++i) {
 						if (!stats[i].isDirectory() && stats[i].getPath().toString().contains("pp")) {
-						//	System.out.println("Reading partition plan from " + stats[i].getPath().toString());
+							System.out.println("Reading partition plan from " + stats[i].getPath().toString());
 							FSDataInputStream currentStream;
 							BufferedReader currentReader;
 							currentStream = fs.open(stats[i].getPath());
@@ -260,7 +255,6 @@ public class FindKNNSupport {
 							String line;
 							while ((line = currentReader.readLine()) != null) {
 								/** parse line */
-
 								String[] splitsStr = line.split(SQConfig.sepStrForRecord);
 								int tempid = Integer.parseInt(splitsStr[0]);
 								for (int j = 0; j < num_dims * 2; j++) {
@@ -288,11 +282,15 @@ public class FindKNNSupport {
 		 * 
 		 * @author Yizhou Yan
 		 * @version Dec 31, 2015
-		 * @throws InterruptedException 
+		 * @throws InterruptedException
 		 */
 
-		public void reduce(IntWritable key, Iterable<Text> values, Context context) throws IOException, InterruptedException {
-			float partitionExpand = 0.0f;
+		public void reduce(IntWritable key, Iterable<Text> values, Context context)
+				throws IOException, InterruptedException {
+			float[] partitionExpand = new float[num_dims * 2];
+			for (int i = 0; i < num_dims * 2; i++)
+				partitionExpand[i] = 0.0f;
+
 			ArrayList<MetricObject> sortedData = new ArrayList<MetricObject>();
 			for (Text value : values) {
 				MetricObject mo = parseObject(key.get(), value.toString());
@@ -300,11 +298,12 @@ public class FindKNNSupport {
 			}
 			String centralPivotStr = "0";
 			for (int j = 0; j < num_dims; j++) {
-				centralPivotStr = centralPivotStr + "," + (partition_store[key.get()][j*2]+partition_store[key.get()][j*2+1])/2.0;
+				centralPivotStr = centralPivotStr + ","
+						+ (partition_store[key.get()][j * 2] + partition_store[key.get()][j * 2 + 1]) / 2.0;
 			}
-			
+
 			Object cPivot = metricSpace.readObject(centralPivotStr, num_dims);
-			for(int i = 0;i< sortedData.size();i++){
+			for (int i = 0; i < sortedData.size(); i++) {
 				sortedData.get(i).setDistToPivot(metric.dist(cPivot, sortedData.get(i).getObj()));
 			}
 			Collections.sort(sortedData, new Comparator<MetricObject>() {
@@ -317,13 +316,14 @@ public class FindKNNSupport {
 						return 0;
 				}
 			});
-			
-	/*		for (MetricObject entry : sortedData) {
-				System.out.println("Entry: " + entry.obj.toString());
-			}*/
+
+			/*
+			 * for (MetricObject entry : sortedData) { System.out.println(
+			 * "Entry: " + entry.obj.toString()); }
+			 */
 			long begin = System.currentTimeMillis();
-			
-			if(sortedData.size() < K ){
+
+			if (sortedData.size() < K) {
 				System.err.println("Contains less than K points in one partition....");
 			}
 			String outputKDistPath = context.getConfiguration().get(SQConfig.strKdistanceOutput);
@@ -332,119 +332,144 @@ public class FindKNNSupport {
 				// find knns for single object within the partition
 				o_S = findKNNForSingleObject(o_S, i, sortedData);
 				// bound supporting area
-				o_S = boundSupportingArea(o_S);
-				// set partition expand distance by points in that partition
-				partitionExpand = Math.max(partitionExpand, o_S.getExpandDist());
+				float[] currentBound = boundSupportingArea(o_S);
+				if (o_S.getType() == 'F')
+					// set partition expand distance by points in that partition
+					partitionExpand = maxOfTwoFloatArray(partitionExpand, currentBound);
 				// output data point
 				outputMultipleTypeData(o_S, outputKDistPath, context);
-				if(o_S.getType() == 'T')
-					context.getCounter(Counters.ComputedKnns).increment(1);
-				else if(o_S.getType() == 'F')
-					context.getCounter(Counters.UncomputedKnns).increment(1);
+				// if (o_S.getType() == 'T')
+				// context.getCounter(Counters.ComputedKnns).increment(1);
+				// else if (o_S.getType() == 'F')
+				// context.getCounter(Counters.UncomputedKnns).increment(1);
 			}
 			// output partition plan
 			int curPartitionId = sortedData.get(0).getPartition_id();
 			String outputPPPath = context.getConfiguration().get(SQConfig.strKnnPartitionPlan);
-			mos.write(new IntWritable(1),new Text(curPartitionId + SQConfig.sepStrForRecord + partition_store[curPartitionId][0]+
-					SQConfig.sepStrForRecord + partition_store[curPartitionId][1] + SQConfig.sepStrForRecord + 
-					partition_store[curPartitionId][2]+ SQConfig.sepStrForRecord + partition_store[curPartitionId][3]
-							+ SQConfig.sepStrForRecord + partitionExpand)
-					,outputPPPath+"/pp" + context.getTaskAttemptID());
+			String str = "";
+			str += curPartitionId + SQConfig.sepStrForRecord;
+			for (int i = 0; i < num_dims * 2; i++) {
+				str += partition_store[curPartitionId][i] + SQConfig.sepStrForRecord;
+			}
+			for (int i = 0; i < num_dims * 2; i++) {
+				str += partitionExpand[i] + SQConfig.sepStrForRecord;
+			}
+			str = str.substring(0, str.length() - 1);
+			mos.write(NullWritable.get(), new Text(str), outputPPPath + "/pp" + context.getTaskAttemptID());
 			long end = System.currentTimeMillis();
 			long second = (end - begin) / 1000;
 			System.err.println("computation time " + " takes " + second + " seconds");
 		}
+
+		public static float[] maxOfTwoFloatArray(float[] x, float[] y) {
+			float[] newArray = new float[num_dims * 2];
+			for (int i = 0; i < x.length; i++) {
+				newArray[i] = Math.max(x[i], y[i]);
+			}
+			return newArray;
+		}
+
 		/**
 		 * output different types of data points in multiple files
-		 * @param context 
+		 * 
+		 * @param context
 		 * @param o_R
-		 * @throws InterruptedException 
-		 * @throws IOException 
+		 * @throws InterruptedException
+		 * @throws IOException
 		 */
-		public void outputMultipleTypeData(MetricObject o_R, String outputKDistPath, Context context) throws IOException, InterruptedException{
-			//output format key:nid   value: point value, partition id, k-distance, (KNN's nid and dist),tag
+		public void outputMultipleTypeData(MetricObject o_R, String outputKDistPath, Context context)
+				throws IOException, InterruptedException {
+			// output format key:nid value: point value, partition id,
+			// k-distance, (KNN's nid and dist),tag
 			LongWritable outputKey = new LongWritable();
 			Text outputValue = new Text();
-			
+
 			String line = "";
 			line = line + o_R.getPartition_id() + SQConfig.sepStrForRecord + o_R.getKdist() + SQConfig.sepStrForRecord;
 			for (Map.Entry<Long, Float> entry : o_R.getKnnInDetail().entrySet()) {
-			    long keyMap = entry.getKey();
-			    float valueMap = entry.getValue();
-			    line = line + keyMap + SQConfig.sepStrForIDDist + valueMap + SQConfig.sepStrForRecord;
+				long keyMap = entry.getKey();
+				float valueMap = entry.getValue();
+				line = line + keyMap + SQConfig.sepStrForIDDist + valueMap + SQConfig.sepStrForRecord;
 			}
 			line = line + o_R.getType();
 			outputKey.set(((Record) o_R.getObj()).getRId());
-			outputValue.set(((Record)o_R.getObj()).dimToString() + SQConfig.sepStrForRecord + line);
-			mos.write(outputKey,outputValue, outputKDistPath + "/kdist"+context.getTaskAttemptID());
-	/*		if(o_R.getType()=='T')
-				mos.write(outputKey,outputValue, outputKDistPath + "/yes/kdist");
-			else if(o_R.getType() == 'F')
-				mos.write(outputKey,outputValue, outputKDistPath + "/not/kdist");*/
-				//	System.out.println("Key: "+ outputKey +" Value: "+outputValue);
-			//		context.write(outputKey, outputValue);
+			outputValue.set(((Record) o_R.getObj()).dimToString() + SQConfig.sepStrForRecord + line);
+			mos.write(outputKey, outputValue, outputKDistPath + "/kdist" + context.getTaskAttemptID());
+			/*
+			 * if(o_R.getType()=='T') mos.write(outputKey,outputValue,
+			 * outputKDistPath + "/yes/kdist"); else if(o_R.getType() == 'F')
+			 * mos.write(outputKey,outputValue, outputKDistPath + "/not/kdist");
+			 */
+			// System.out.println("Key: "+ outputKey +" Value: "+outputValue);
+			// context.write(outputKey, outputValue);
 		}
-		
+
 		/**
 		 * 
-		 * @param o_R MetricObject with kdistance and knns
-		 * @return MetricObject with tag (T: true kNN, already find kNNs within the partition
-		 * 								  N: false kNN, kNNs might in other partitions)
+		 * @param o_R
+		 *            MetricObject with kdistance and knns
+		 * @return MetricObject with tag (T: true kNN, already find kNNs within
+		 *         the partition N: false kNN, kNNs might in other partitions)
 		 */
-		private MetricObject boundSupportingArea(MetricObject o_R){
+		private float[] boundSupportingArea(MetricObject o_R) {
+			float[] boundForCurPoint = new float[num_dims * 2];
+			for (int i = 0; i < num_dims * 2; i++)
+				boundForCurPoint[i] = 0.0f;
+
 			Record currentPoint = (Record) o_R.getObj();
-			float [] currentPointCoor = currentPoint.getValue();
+			float[] currentPointCoor = currentPoint.getValue();
 			float currentKDist = o_R.getKdist();
 			boolean tag = true;
-			float expandDist = 0.0f;
-			for (int i = 0; i< num_dims;i++){
-				float minCurrent = Math.max(domains[i][0],currentPointCoor[i] - currentKDist);
-				float maxCurrent = Math.min(domains[i][1]-Float.MIN_VALUE, currentPointCoor[i] + currentKDist);
-				if(minCurrent < partition_store[o_R.getPartition_id()][2*i]){
+			for (int i = 0; i < num_dims; i++) {
+				float minCurrent = Math.max(domains[0], currentPointCoor[i] - currentKDist);
+				float maxCurrent = Math.min(domains[1] - Float.MIN_VALUE, currentPointCoor[i] + currentKDist);
+				if (minCurrent < partition_store[o_R.getPartition_id()][2 * i]) {
 					tag = false;
-					expandDist = Math.max(expandDist, Math.abs(partition_store[o_R.getPartition_id()][2*i]-minCurrent));
+					boundForCurPoint[2 * i] = Math.max(boundForCurPoint[2 * i],
+							Math.abs(partition_store[o_R.getPartition_id()][2 * i] - minCurrent));
 				}
-				if(maxCurrent > partition_store[o_R.getPartition_id()][2*i+1]){
+				if (maxCurrent > partition_store[o_R.getPartition_id()][2 * i + 1]) {
 					tag = false;
-					expandDist = Math.max(expandDist, Math.abs(partition_store[o_R.getPartition_id()][2*i+1]-maxCurrent));
-				}else if(maxCurrent  == partition_store[o_R.getPartition_id()][2*i+1]){
+					boundForCurPoint[2 * i + 1] = Math.max(boundForCurPoint[2 * i + 1],
+							Math.abs(partition_store[o_R.getPartition_id()][2 * i + 1] - maxCurrent));
+				} else if (maxCurrent == partition_store[o_R.getPartition_id()][2 * i + 1]) {
 					tag = false;
-					expandDist = Math.max(Float.MIN_VALUE,expandDist);
+					boundForCurPoint[2 * i + 1] = Math.max(Float.MIN_VALUE, boundForCurPoint[2 * i + 1]);
 				}
 			}
-			if(tag == false)
+			if (tag == false)
 				o_R.setType('F');
 			else
 				o_R.setType('T');
-			o_R.setExpandDist(expandDist);
-			return o_R;
+			return boundForCurPoint;
 		}
-		
+
 		/**
 		 * find kNN using pivot based index
 		 * 
 		 * @return MetricObject with kdistance and knns
 		 * @throws InterruptedException
 		 */
-		private MetricObject findKNNForSingleObject(MetricObject o_R, int currentIndex, ArrayList<MetricObject> sortedData) throws IOException, InterruptedException {
+		private MetricObject findKNNForSingleObject(MetricObject o_R, int currentIndex,
+				ArrayList<MetricObject> sortedData) throws IOException, InterruptedException {
 			float dist;
-			PriorityQueue pq = new PriorityQueue(
-					PriorityQueue.SORT_ORDER_DESCENDING);
-			
+			PriorityQueue pq = new PriorityQueue(PriorityQueue.SORT_ORDER_DESCENDING);
+
 			float theta = Float.POSITIVE_INFINITY;
 			boolean kNNfound = false;
-			int inc_current = currentIndex+1;
-			int dec_current = currentIndex-1;
-			float i=0, j=0; // i---increase  j---decrease
-			while((!kNNfound)&&((inc_current<sortedData.size())||(dec_current>=0))) {
-			//	System.out.println("increase: "+ inc_current+"; decrease: "+dec_current);
-				if((inc_current>sortedData.size()-1)&&(dec_current<0))
+			int inc_current = currentIndex + 1;
+			int dec_current = currentIndex - 1;
+			float i = 0, j = 0; // i---increase j---decrease
+			while ((!kNNfound) && ((inc_current < sortedData.size()) || (dec_current >= 0))) {
+				// System.out.println("increase: "+ inc_current+"; decrease:
+				// "+dec_current);
+				if ((inc_current > sortedData.size() - 1) && (dec_current < 0))
 					break;
-				if(inc_current>sortedData.size()-1)
+				if (inc_current > sortedData.size() - 1)
 					i = Float.MAX_VALUE;
-				if(dec_current<0)
+				if (dec_current < 0)
 					j = Float.MAX_VALUE;
-				if(i<=j){
+				if (i <= j) {
 					MetricObject o_S = sortedData.get(inc_current);
 					dist = metric.dist(o_R.getObj(), o_S.getObj());
 					if (pq.size() < K) {
@@ -455,9 +480,9 @@ public class FindKNNSupport {
 						pq.insert(metricSpace.getID(o_S.getObj()), dist);
 						theta = pq.getPriority();
 					}
-					inc_current+=1;
-					i = Math.abs(o_R.getDistToPivot()-o_S.getDistToPivot());
-				}else{
+					inc_current += 1;
+					i = Math.abs(o_R.getDistToPivot() - o_S.getDistToPivot());
+				} else {
 					MetricObject o_S = sortedData.get(dec_current);
 					dist = metric.dist(o_R.getObj(), o_S.getObj());
 					if (pq.size() < K) {
@@ -468,12 +493,12 @@ public class FindKNNSupport {
 						pq.insert(metricSpace.getID(o_S.getObj()), dist);
 						theta = pq.getPriority();
 					}
-					dec_current-=1;
-					j = Math.abs(o_R.getDistToPivot()-o_S.getDistToPivot());
-				}	
-		//		System.out.println(pq.getPriority()+","+i+","+j);
-				if(i>pq.getPriority() && j>pq.getPriority() &&(pq.size()==K))
-					kNNfound=true;
+					dec_current -= 1;
+					j = Math.abs(o_R.getDistToPivot() - o_S.getDistToPivot());
+				}
+				// System.out.println(pq.getPriority()+","+i+","+j);
+				if (i > pq.getPriority() && j > pq.getPriority() && (pq.size() == K))
+					kNNfound = true;
 			}
 			o_R.setKdist(pq.getPriority());
 			while (pq.size() > 0) {
@@ -482,6 +507,7 @@ public class FindKNNSupport {
 			}
 			return o_R;
 		}
+
 		public void cleanup(Context context) throws IOException, InterruptedException {
 			mos.close();
 		}
@@ -499,8 +525,8 @@ public class FindKNNSupport {
 		job.setMapperClass(KNNFinderMapper.class);
 
 		/** set multiple output path */
-		MultipleOutputs.addNamedOutput(job, "partitionplan", TextOutputFormat.class, IntWritable.class, Text.class);
-		MultipleOutputs.addNamedOutput(job, "kdistance", TextOutputFormat.class, IntWritable.class, Text.class);
+		MultipleOutputs.addNamedOutput(job, "partitionplan", TextOutputFormat.class, NullWritable.class, Text.class);
+		MultipleOutputs.addNamedOutput(job, "kdistance", TextOutputFormat.class, LongWritable.class, Text.class);
 
 		job.setReducerClass(KNNFinderReducer.class);
 		job.setMapOutputKeyClass(IntWritable.class);
@@ -508,7 +534,7 @@ public class FindKNNSupport {
 		job.setOutputKeyClass(LongWritable.class);
 		job.setOutputValueClass(Text.class);
 		job.setNumReduceTasks(conf.getInt(SQConfig.strNumOfReducers, 1));
-
+		// job.setNumReduceTasks(0);
 		String strFSName = conf.get("fs.default.name");
 		FileInputFormat.addInputPath(job, new Path(conf.get(SQConfig.dataset)));
 		FileSystem fs = FileSystem.get(conf);

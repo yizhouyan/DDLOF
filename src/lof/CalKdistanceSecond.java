@@ -63,39 +63,40 @@ public class CalKdistanceSecond {
 		public static int cell_num = 501;
 
 		/** The domains. (set by user) */
-		private static double[][] domains;
+		private static float[] domains;
 		/** size of each small buckets */
 		private static int smallRange;
 		/**
 		 * block list, which saves each block's info including start & end
 		 * positions on each dimension. print for speed up "mapping"
 		 */
-		private static double[][] partition_store;
+		private static float[][] partition_store;
 		/** save each small buckets. in order to speed up mapping process */
-		private static CellStore[][] cell_store;
+		private static CellStore[] cell_store;
 		/**
 		 * Number of desired partitions in each dimension (set by user), for
 		 * Data Driven partition
 		 */
-		private static int[] di_numBuckets;
+		private static int di_numBuckets;
 
 		private static int K;
+
+		private static int maxLimitSupporting;
 
 		protected void setup(Context context) throws IOException, InterruptedException {
 			Configuration conf = context.getConfiguration();
 			/** get configuration from file */
 			num_dims = conf.getInt(SQConfig.strDimExpression, 2);
 			cell_num = conf.getInt(SQConfig.strNumOfSmallCells, 501);
-			domains = new double[num_dims][2];
-			domains[0][0] = domains[1][0] = conf.getDouble(SQConfig.strDomainMin, 0.0);
-			domains[0][1] = domains[1][1] = conf.getDouble(SQConfig.strDomainMax, 10001);
-			smallRange = (int) Math.ceil((domains[0][1] - domains[0][0]) / cell_num);
-			cell_store = new CellStore[cell_num][cell_num];
-			di_numBuckets = new int[num_dims];
-			for (int i = 0; i < num_dims; i++) {
-				di_numBuckets[i] = conf.getInt(SQConfig.strNumOfPartitions, 2);
-			}
-			partition_store = new double[di_numBuckets[0] * di_numBuckets[1]][num_dims * 2 + 1];
+			domains = new float[2];
+			domains[0] = conf.getFloat(SQConfig.strDomainMin, 0.0f);
+			domains[1] = conf.getFloat(SQConfig.strDomainMax, 10001.0f);
+			smallRange = (int) Math.ceil((domains[1] - domains[0]) / cell_num);
+			cell_store = new CellStore[(int) Math.pow(cell_num, num_dims)];
+			di_numBuckets = conf.getInt(SQConfig.strNumOfPartitions, 2);
+
+			partition_store = new float[(int) Math.pow(di_numBuckets, num_dims)][num_dims * 4];
+			maxLimitSupporting = conf.getInt(SQConfig.strMaxLimitSupportingArea, 5000);
 			K = Integer.valueOf(conf.get(SQConfig.strK, "1"));
 			/** parse files in the cache */
 			try {
@@ -112,8 +113,7 @@ public class CalKdistanceSecond {
 					FileStatus[] stats = fs.listStatus(new Path(filename));
 					for (int i = 0; i < stats.length; ++i) {
 						if (!stats[i].isDirectory() && stats[i].getPath().toString().contains("pp")) {
-							// System.out.println("Reading partition plan from "
-							// + stats[i].getPath().toString());
+							System.out.println("Reading partition plan from " + stats[i].getPath().toString());
 							FSDataInputStream currentStream;
 							BufferedReader currentReader;
 							currentStream = fs.open(stats[i].getPath());
@@ -122,20 +122,25 @@ public class CalKdistanceSecond {
 							while ((line = currentReader.readLine()) != null) {
 								/** parse line */
 
-								String[] splitsStr = line.split(SQConfig.sepStrForKeyValue)[1]
-										.split(SQConfig.sepStrForRecord);
+								String[] splitsStr = line.split(SQConfig.sepStrForRecord);
 								int tempid = Integer.parseInt(splitsStr[0]);
-								for (int j = 0; j < num_dims * 2 + 1; j++) {
-									partition_store[tempid][j] = Double.parseDouble(splitsStr[j + 1]);
+								for (int j = 1; j < num_dims * 4 + 1; j++) {
+									partition_store[tempid][j - 1] = Float.parseFloat(splitsStr[j]);
+									// System.out.print(partition_store[tempid][j
+									// - 1] + ",");
 								}
-								if (partition_store[tempid][4] >= 100)
-									partition_store[tempid][4] = 100;
-								System.out.println("partitionplan : " + partition_store[tempid][4]);
+								// System.out.println();
+								for (int j = num_dims * 2; j < num_dims * 4; j++) {
+									if (partition_store[tempid][j] >= maxLimitSupporting)
+										partition_store[tempid][j] = maxLimitSupporting;
+								}
+
 							}
 							currentReader.close();
 							currentStream.close();
 						} else if (!stats[i].isDirectory() && stats[i].getPath().toString().contains("part")) {
-				//			System.out.println("Reading cells for partitions from " + stats[i].getPath().toString());
+							// System.out.println("Reading cells for partitions
+							// from " + stats[i].getPath().toString());
 							FSDataInputStream currentStream;
 							BufferedReader currentReader;
 							currentStream = fs.open(stats[i].getPath());
@@ -144,25 +149,19 @@ public class CalKdistanceSecond {
 							while ((line = currentReader.readLine()) != null) {
 								/** parse line */
 								String[] items = line.split(SQConfig.sepStrForRecord);
-								if (items.length >= 6) {
-									int x_1 = (int) (Double.valueOf(items[0]) / smallRange);
-									int y_1 = (int) (Double.valueOf(items[2]) / smallRange);
-									cell_store[x_1][y_1] = new CellStore(x_1 * smallRange, (x_1 + 1) * smallRange,
-											(y_1) * smallRange, (y_1 + 1) * smallRange);
-									cell_store[x_1][y_1].core_partition_id = Integer.valueOf(items[4].substring(2));
-
-									for (int j = 5; j < items.length; j++) {
-										if (j == 5 && (!items[j].contains(":"))) {
-											break;
-										}
-										if (j == 5) {
-											cell_store[x_1][y_1].support_partition_id
-													.add(Integer.valueOf(items[5].substring(2)));
-										} else {
-											cell_store[x_1][y_1].support_partition_id.add(Integer.valueOf(items[j]));
+								if (items.length == 3) {
+									int cellId = Integer.parseInt(items[0]);
+									int corePartitionId = Integer.valueOf(items[1].substring(2));
+									cell_store[cellId] = new CellStore(cellId, corePartitionId);
+									if (items[2].length() > 1) { // has support
+																	// cells
+										String[] splitStr = items[2].substring(2, items[2].length())
+												.split(SQConfig.sepSplitForIDDist);
+										for (int j = 0; j < splitStr.length; j++) {
+											cell_store[cellId].support_partition_id.add(Integer.valueOf(splitStr[j]));
 										}
 									}
-									// System.out.println(cell_store[x_1][y_1].printCellStoreWithSupport());
+									// System.out.println(cell_store[cellId].printCellStoreWithSupport());
 								}
 							}
 							currentReader.close();
@@ -182,36 +181,29 @@ public class CalKdistanceSecond {
 			// input format key:nid value: point value, partition id,
 			// k-distance, (KNN's nid and dist),tag
 			String inputStr = value.toString();
-			if (inputStr.split(SQConfig.sepStrForKeyValue).length < 2){
-			//	System.out.println("Error Output: " + inputStr);
-			}
-			else {
+			if (inputStr.split(SQConfig.sepStrForKeyValue).length < 2) {
+				System.out.println("Error Output: " + inputStr);
+			} else {
 				String[] inputStrSplits = inputStr.split(SQConfig.sepStrForKeyValue)[1].split(SQConfig.sepStrForRecord);
-				if(inputStrSplits.length < 5 + K){
-				//	System.out.println("Error in one record: " + value.toString());
+				if (inputStrSplits.length < 3 + num_dims + K) {
 					return;
 				}
 				long pointId = Long.valueOf(inputStr.split(SQConfig.sepStrForKeyValue)[0]);
-				double[] crds = new double[num_dims]; // coordinates of one
-														// input
-														// data
+				float[] crds = new float[num_dims];
 				// parse raw input data into coordinates/crds
 				for (int i = 0; i < num_dims; i++) {
-					crds[i] = Double.parseDouble(inputStrSplits[i]);
+					crds[i] = Float.parseFloat(inputStrSplits[i]);
 				}
 				// core partition id
-				int corePartitionId = Integer.valueOf(inputStrSplits[2]);
-
-				// find which cell the point in
-				int x_cellstore = (int) (Math.floor(crds[0] / smallRange));
-				int y_cellstore = (int) (Math.floor(crds[1] / smallRange));
+				int corePartitionId = Integer.valueOf(inputStrSplits[num_dims]);
 
 				// k-distance saved
-				double curKdist = (inputStrSplits[3].equals("")) ? 0 : Double.valueOf(inputStrSplits[3]);
+				float curKdist = (inputStrSplits[num_dims + 1].equals("")) ? 0
+						: Float.valueOf(inputStrSplits[num_dims + 1]);
 
 				// knns
 				String curKnns = "";
-				for (int i = 4; i < inputStrSplits.length - 1; i++) {
+				for (int i = num_dims + 2; i < inputStrSplits.length - 1; i++) {
 					curKnns = curKnns + inputStrSplits[i] + SQConfig.sepStrForRecord;
 				}
 				if (curKnns.length() > 0)
@@ -220,14 +212,17 @@ public class CalKdistanceSecond {
 				// tag
 				char curTag = inputStrSplits[inputStrSplits.length - 1].charAt(0);
 
+				// find which cell the point in
+
+				int cellStoreId = CellStore.ComputeCellStoreId(crds, num_dims, cell_num, smallRange);
+				// System.out.println("CellStore ID: " + cellStoreId);
+
 				// build up partitions to check and save to a hash set (by core
 				// area
 				// and support area of the cell)
 				Set<Integer> partitionToCheck = new HashSet<Integer>();
-				partitionToCheck.add(cell_store[x_cellstore][y_cellstore].core_partition_id);
-
-				for (Iterator itr = cell_store[x_cellstore][y_cellstore].support_partition_id.iterator(); itr
-						.hasNext();) {
+				// partitionToCheck.add(cell_store[cellStoreId].core_partition_id);
+				for (Iterator itr = cell_store[cellStoreId].support_partition_id.iterator(); itr.hasNext();) {
 					int keyiter = (Integer) itr.next();
 					partitionToCheck.add(keyiter);
 				}
@@ -243,29 +238,15 @@ public class CalKdistanceSecond {
 					}
 					// for(int blk_id=0;blk_id<markEndPoints(crds[0]);blk_id++)
 					// {
-					int belong = 0; // indicate whether the point belongs, 0 ->
-									// neither; 1 -> regular; 2-> extend
+					int belong = 0; // indicate whether the point belongs, 0
+									// ->neither; 2-> extend
 					// traverse block's start & end positions in each dimension
 					for (int i = 0; i < num_dims; i++) {
-						// check if the point belongs to current regular block
-						// or
-						// this block's extended area
-						if (crds[i] < partition_store[blk_id][2 * i + 1] + partition_store[blk_id][2 * num_dims]
-								&& crds[i] >= partition_store[blk_id][2 * i] - partition_store[blk_id][2 * num_dims]) {
-							// check if the point belongs to current regular
-							// block
-							if (crds[i] >= partition_store[blk_id][2 * i]
-									&& crds[i] < partition_store[blk_id][2 * i + 1]) {
-								if (belong != 2) {
-									belong = 1;
-								}
-							}
-							// otherwise the point belongs to this block's
-							// extended
-							// area
-							else {
-								belong = 2;
-							}
+						if (crds[i] < partition_store[blk_id][2 * i + 1]
+								+ partition_store[blk_id][2 * num_dims + 2 * i + 1]
+								&& crds[i] >= partition_store[blk_id][2 * i]
+										- partition_store[blk_id][2 * num_dims + 2 * i]) {
+							belong = 2;
 						} else {
 							belong = 0;
 							break;
@@ -275,8 +256,12 @@ public class CalKdistanceSecond {
 					// output block key and data value
 					if (belong == 2) { // support area data
 						// output to support area with a tag 'S'
-						context.write(new IntWritable(blk_id), new Text(pointId + SQConfig.sepStrForRecord + crds[0]
-								+ SQConfig.sepStrForRecord + crds[1] + SQConfig.sepStrForRecord + 'S'));
+						String str = "";
+						str = str + pointId + SQConfig.sepStrForRecord;
+						for (int i = 0; i < num_dims; i++)
+							str = str + crds[i] + SQConfig.sepStrForRecord;
+
+						context.write(new IntWritable(blk_id), new Text(str + 'S'));
 						// save information to whoseSupport
 						whoseSupport = whoseSupport + blk_id + SQConfig.sepStrForIDDist;
 					} // end if
@@ -287,10 +272,12 @@ public class CalKdistanceSecond {
 				// output core area
 				// format key : core partition id value: nid,node
 				// information,kdistance, knns, tag
-				context.write(new IntWritable(corePartitionId),
-						new Text(pointId + SQConfig.sepStrForRecord + crds[0] + SQConfig.sepStrForRecord + crds[1]
-								+ SQConfig.sepStrForRecord + curKdist + SQConfig.sepStrForRecord + curKnns
-								+ SQConfig.sepStrForRecord + curTag + SQConfig.sepStrForRecord + whoseSupport));
+				String str = "";
+				str = str + pointId + SQConfig.sepStrForRecord;
+				for (int i = 0; i < num_dims; i++)
+					str = str + crds[i] + SQConfig.sepStrForRecord;
+				context.write(new IntWritable(corePartitionId), new Text(str + curKdist + SQConfig.sepStrForRecord
+						+ curKnns + SQConfig.sepStrForRecord + curTag + SQConfig.sepStrForRecord + whoseSupport));
 			}
 		}// end map function
 	} // end map class
@@ -362,20 +349,19 @@ public class CalKdistanceSecond {
 		 * @return
 		 */
 		private MetricObject parseCoreObject(int key, String strInput) {
-
 			String[] splitStrInput = strInput.split(SQConfig.sepStrForRecord);
 			int partition_id = key;
 			int offset = 0;
-			Object obj = metricSpace.readObject(
-					strInput.substring(offset,
-							splitStrInput[0].length() + splitStrInput[1].length() + splitStrInput[2].length() + 2),
-					num_dims);
-			float curKdist = Float.parseFloat(splitStrInput[3]);
-			offset = splitStrInput[0].length() + splitStrInput[1].length() + splitStrInput[2].length()
-					+ splitStrInput[3].length() + 4;
+			int lengthOfObjects = splitStrInput[0].length();
+			for (int i = 1; i <= num_dims; i++) {
+				lengthOfObjects += splitStrInput[i].length() + 1;
+			}
+			Object obj = metricSpace.readObject(strInput.substring(offset, lengthOfObjects), num_dims);
+			float curKdist = Float.parseFloat(splitStrInput[num_dims + 1]);
+			offset = lengthOfObjects + splitStrInput[num_dims + 1].length() + 2;
 			int endoffset = strInput.indexOf("F");
 			String[] subSplits = strInput.substring(offset, endoffset - 1).split(SQConfig.sepStrForRecord);
-
+			
 			Map<Long, Float> knnInDetail = new HashMap<Long, Float>();
 			for (int i = 0; i < subSplits.length; i++) {
 				long knnid = Long.parseLong(subSplits[i].split(SQConfig.sepSplitForIDDist)[0]);
@@ -401,13 +387,12 @@ public class CalKdistanceSecond {
 			int countSupporting = 0;
 			boolean moreSupporting = true;
 			for (Text value : values) {
-
 				String[] splitStrInput = value.toString().split(SQConfig.sepStrForRecord);
-				if (splitStrInput.length == 4 && moreSupporting) {
+				if ((splitStrInput.length == (2 + num_dims)) && moreSupporting) {
 					MetricObject mo = parseSupportObject(key.get(), value.toString());
 					sortedData.add(mo);
 					countSupporting++;
-					if (countSupporting >= 5000000) {
+					if (countSupporting >= 8000000) {
 						moreSupporting = false;
 					}
 				} else if (value.toString().contains("F")) {
@@ -416,9 +401,12 @@ public class CalKdistanceSecond {
 				} else if (value.toString().contains("T")) {
 					// output those already know extract knns
 					int offset = 0;
-					float curKdist = Float.parseFloat(splitStrInput[3]);
-					offset = splitStrInput[0].length() + splitStrInput[1].length() + splitStrInput[2].length()
-							+ splitStrInput[3].length() + 4;
+					float curKdist = Float.parseFloat(splitStrInput[num_dims + 1]);
+					int lengthOfObjects = splitStrInput[0].length();
+					for (int i = 1; i <= num_dims; i++) {
+						lengthOfObjects += splitStrInput[i].length() + 1;
+					}
+					offset = lengthOfObjects + splitStrInput[num_dims + 1].length() + 2;
 					int endoffset = value.toString().indexOf("T");
 					String knnsDetail = value.toString().substring(offset, endoffset - 1);
 					String whoseSupport = value.toString().substring(value.toString().indexOf("T") + 2,
@@ -578,8 +566,8 @@ public class CalKdistanceSecond {
 		job.setOutputKeyClass(LongWritable.class);
 		job.setOutputValueClass(Text.class);
 		job.setReducerClass(CalKdistSecondReducer.class);
-		job.setNumReduceTasks(conf.getInt(SQConfig.strNumOfReducers, 1));
-		// job.setNumReduceTasks(0);
+		 job.setNumReduceTasks(conf.getInt(SQConfig.strNumOfReducers, 1));
+//		job.setNumReduceTasks(0);
 
 		String strFSName = conf.get("fs.default.name");
 		FileInputFormat.addInputPath(job, new Path(conf.get(SQConfig.strKdistanceOutput)));

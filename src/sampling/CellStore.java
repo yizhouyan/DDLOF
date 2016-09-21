@@ -4,6 +4,8 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
 
+import util.SQConfig;
+
 public class CellStore{
 	public int cellStoreId;
 	public int core_partition_id = Integer.MIN_VALUE;
@@ -12,9 +14,14 @@ public class CellStore{
 		this.cellStoreId = cellStoreId;
 	}
 
+	public CellStore(int cellStoreId, int core_partition_id){
+		this.cellStoreId = cellStoreId;
+		this.core_partition_id = core_partition_id;
+	}
 	public CellStore(){
 		
 	}
+	
 	public String printCellStoreBasic(){
 		String str = "";
 		str += cellStoreId+",";
@@ -27,7 +34,7 @@ public class CellStore{
 		str += "C:" + core_partition_id+","+ "S:";
 		for(Iterator itr = support_partition_id.iterator(); itr.hasNext();){ 
 			int keyiter = (Integer) itr.next();
-			str += keyiter+",";
+			str += keyiter+SQConfig.sepStrForIDDist;
 		}
 		return str.substring(0,str.length()-1);
 	}
@@ -46,7 +53,7 @@ public class CellStore{
 			return -1;
 		int cellId = 0;
 		for(int i = 0; i< dim; i++){
-			cellId = cellId + (int) (Double.parseDouble(data[i]) * Math.pow(numCellPerDim, i));
+			cellId = cellId + (int) (Float.parseFloat(data[i]) * Math.pow(numCellPerDim, i));
 		}
 		return cellId;
 	}
@@ -73,10 +80,7 @@ public class CellStore{
 	}
 	public static void main(String[] args) throws Exception {
 		CellStore cs = new CellStore();
-		int [] data = {9,9,9,9,5};
-		System.out.println(cs.ComputeCellStoreId(data, 5, 10));
-		
-		int [] secondData = cs.GenerateCellCoordinate(59999, 5, 10);
+		int [] secondData = cs.GenerateCellCoordinate(21, 5, 4);
 		for(int i = 0 ;i < 5;i++){
 			System.out.println(secondData[i]);
 		}

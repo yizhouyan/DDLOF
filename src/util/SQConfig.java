@@ -47,6 +47,9 @@ public class SQConfig {
 	public static final String strKnnNewCellsOutput = "lof.knnfind.cells.newoutput";
 	public static final String strIndexFilePath = "lof.knnfind.cells.indexfile";
 	
+	public static final String strMaxLimitSupportingArea = "lof.max.limit.supporting";
+	
+	
 	public static final String strKdistFinalOutput = "lof.kdistance.output";
 	public static final String strLRDOutput = "lof.lrd.output";
 	public static final String strLOFOutput = "lof.final.output";

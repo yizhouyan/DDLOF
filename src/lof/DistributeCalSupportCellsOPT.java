@@ -1,4 +1,4 @@
-package sampling;
+package lof;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -18,6 +18,7 @@ import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Reducer;
+import org.apache.hadoop.mapreduce.Mapper.Context;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.GenericOptionsParser;
@@ -25,7 +26,7 @@ import org.apache.hadoop.util.GenericOptionsParser;
 import sampling.CellStore;
 import util.SQConfig;
 
-public class DistributedGenerateCellPlan {
+public class DistributeCalSupportCellsOPT {
 
 	public static class DistributedSupportCellMapper extends Mapper<LongWritable, Text, IntWritable, Text> {
 		public static int count = 1;
@@ -70,6 +71,9 @@ public class DistributedGenerateCellPlan {
 		/** save each small buckets. in order to speed up mapping process */
 		private static CellStore[] cell_store;
 
+		// private static double maxOverlaps = 0;
+		private static int maxLimitSupporting;
+
 		/**
 		 * format of each line: key value(id,partition_plan,extand area)
 		 * 
@@ -89,10 +93,9 @@ public class DistributedGenerateCellPlan {
 					String line;
 					while ((line = currentReader.readLine()) != null) {
 						/** parse line */
-
 						String[] values = line.split(SQConfig.sepStrForRecord);
 						int ppid = Integer.valueOf(values[0]);
-						for (int i = 1; i < num_dims * 2 + 1; i++) {
+						for (int i = 1; i < num_dims * 4 + 1; i++) {
 							partition_store[ppid][i - 1] = Float.valueOf(values[i]);
 						}
 					}
@@ -116,8 +119,8 @@ public class DistributedGenerateCellPlan {
 			smallRange = (int) Math.ceil((domains[1] - domains[0]) / cell_num);
 			cell_store = new CellStore[(int) Math.pow(cell_num, num_dims)];
 			di_numBuckets = conf.getInt(SQConfig.strNumOfPartitions, 2);
-			partition_store = new float[(int) Math.pow(di_numBuckets, num_dims)][num_dims * 2];
-
+			partition_store = new float[(int) Math.pow(di_numBuckets, num_dims)][num_dims * 4];
+			maxLimitSupporting = conf.getInt(SQConfig.strMaxLimitSupportingArea, 5000);
 			for (int i = 0; i < cell_store.length; i++)
 				cell_store[i] = new CellStore(i);
 			try {
@@ -155,15 +158,15 @@ public class DistributedGenerateCellPlan {
 
 			for (int i = 0; i < cell_store.length; i++) {
 				if (cell_store[i].core_partition_id >= 0)
-					context.write(NullWritable.get(), new Text(cell_store[i].printCellStoreBasic()));
+					context.write(NullWritable.get(), new Text(cell_store[i].printCellStoreWithSupport()));
 				else
 					System.out.println("Cannot find core partition for this cell:" + i);
 			}
-
 		}
 
 		public void dealEachPartition(int indexOfPartition) {
 			float[] partitionSize = partition_store[indexOfPartition];
+
 			// assign core cells
 			int[] indexes = new int[num_dims * 2];
 			int multiple = 1;
@@ -199,10 +202,99 @@ public class DistributedGenerateCellPlan {
 				previousList.clear();
 			}
 			for (int i = 0; i < newList.size(); i++) {
-				int cellId = CellStore.ComputeCellStoreId(newList.get(i), num_dims, cell_num);
-//				if(cell_store[cellId].core_partition_id>=0)
-//					System.out.println("Already set to one core partition? Why???");
+				int cellId = CellStore.ComputeCellStoreId(newList.get(i).substring(0, newList.get(i).length() - 1),
+						num_dims, cell_num);
+				// if(cell_store[cellId].core_partition_id>=0)
+				// System.out.println("Already set to one core partition?
+				// Why???");
 				cell_store[cellId].core_partition_id = indexOfPartition;
+			}
+
+			// assign supporitng cells(dim *2 parts)
+			int[] supportCellsSize = new int[num_dims * 2];
+			for (int i = num_dims * 2; i < num_dims * 4; i++) {
+				if (partitionSize[i] >= maxLimitSupporting)
+					partitionSize[i] = maxLimitSupporting;
+			}
+			for (int i = 0; i < num_dims * 2; i++) {
+				supportCellsSize[i] = (int) (Math.ceil(partitionSize[i + num_dims * 2] / smallRange));
+			}
+
+			int[] newindexes = new int[num_dims * 2];
+			for (int i = 0; i < num_dims; i++) {
+				newindexes[2 * i] = Math.max(0, indexes[2 * i] - supportCellsSize[2 * i]);
+				newindexes[2 * i + 1] = Math.min(cell_num, indexes[2 * i + 1] + supportCellsSize[2 * i + 1]);
+				// System.out.print(newindexes[2 * i] + "," + newindexes[2 * i +
+				// 1] + ",");
+			}
+			// System.out.println();
+
+			ArrayList<String> finalSupportList = new ArrayList<String>();
+
+			for (int i = 0; i < num_dims; i++) {
+				previousList.clear();
+				newList.clear();
+				if (indexes[2 * i] != newindexes[2 * i]) {
+					for (int j = 0; j < num_dims; j++) {
+						previousList.addAll(newList);
+						newList.clear();
+						int beginIndex;
+						int endIndex;
+						if (i == j) {
+							beginIndex = newindexes[2 * i];
+							endIndex = indexes[2 * i];
+						} else {
+							beginIndex = newindexes[2 * j];
+							endIndex = newindexes[2 * j + 1];
+						}
+						for (int k = beginIndex; k < endIndex; k++) {
+							if (previousList.size() == 0)
+								newList.add(k + ",");
+							else {
+								for (int mm = 0; mm < previousList.size(); mm++) {
+									newList.add(previousList.get(mm) + k + ",");
+								}
+							}
+						}
+						previousList.clear();
+					} // end iterator
+					finalSupportList.addAll(newList);
+				} // end dealing with the first item
+				previousList.clear();
+				newList.clear();
+				if (indexes[2 * i + 1] != newindexes[2 * i + 1]) {
+					for (int j = 0; j < num_dims; j++) {
+						previousList.addAll(newList);
+						newList.clear();
+						int beginIndex;
+						int endIndex;
+						if (i == j) {
+							beginIndex = indexes[2 * i + 1];
+							endIndex = newindexes[2 * i + 1];
+						} else {
+							beginIndex = newindexes[2 * j];
+							endIndex = newindexes[2 * j + 1];
+						}
+						for (int k = beginIndex; k < endIndex; k++) {
+							if (previousList.size() == 0)
+								newList.add(k + ",");
+							else {
+								for (int mm = 0; mm < previousList.size(); mm++) {
+									newList.add(previousList.get(mm) + k + ",");
+								}
+							}
+						}
+						previousList.clear();
+					} // end iterator
+					finalSupportList.addAll(newList);
+				} // end dealing with the second item
+			}
+//			System.out.println("Size:" + finalSupportList.size());
+			for (int i = 0; i < finalSupportList.size(); i++) {
+				// System.out.println(finalSupportList.get(i));
+				int cellId = CellStore.ComputeCellStoreId(
+						finalSupportList.get(i).substring(0, finalSupportList.get(i).length() - 1), num_dims, cell_num);
+				cell_store[cellId].support_partition_id.add(indexOfPartition);
 			}
 
 		}
@@ -217,7 +309,7 @@ public class DistributedGenerateCellPlan {
 		/** set job parameter */
 		Job job = Job.getInstance(conf, "Count Cells for supporting area");
 
-		job.setJarByClass(DistributedGenerateCellPlan.class);
+		job.setJarByClass(DistributeCalSupportCellsOPT.class);
 		job.setMapperClass(DistributedSupportCellMapper.class);
 		job.setReducerClass(DistributedSupportCellReducer.class);
 		job.setMapOutputKeyClass(IntWritable.class);
@@ -229,9 +321,9 @@ public class DistributedGenerateCellPlan {
 		String strFSName = conf.get("fs.default.name");
 		FileInputFormat.addInputPath(job, new Path(conf.get(SQConfig.strIndexFilePath)));
 		FileSystem fs = FileSystem.get(conf);
-		fs.delete(new Path(conf.get(SQConfig.strCellsOutput)), true);
-		FileOutputFormat.setOutputPath(job, new Path(conf.get(SQConfig.strCellsOutput)));
-		job.addCacheArchive(new URI(strFSName + conf.get(SQConfig.strPartitionPlanOutput)));
+		fs.delete(new Path(conf.get(SQConfig.strKnnCellsOutput)), true);
+		FileOutputFormat.setOutputPath(job, new Path(conf.get(SQConfig.strKnnCellsOutput)));
+		job.addCacheArchive(new URI(strFSName + conf.get(SQConfig.strKnnPartitionPlan)));
 
 		/** print job parameter */
 		System.err.println("# of dim: " + conf.getInt(SQConfig.strDimExpression, 10));
@@ -243,7 +335,7 @@ public class DistributedGenerateCellPlan {
 	}
 
 	public static void main(String[] args) throws Exception {
-		DistributedGenerateCellPlan dcsc = new DistributedGenerateCellPlan();
+		DistributeCalSupportCellsOPT dcsc = new DistributeCalSupportCellsOPT();
 		dcsc.run(args);
 	}
 }
