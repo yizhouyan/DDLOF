@@ -120,6 +120,7 @@ public class DistributedGenerateCellPlan {
 
 			for (int i = 0; i < cell_store.length; i++)
 				cell_store[i] = new CellStore(i);
+			System.out.println("Set up finished, start reading cache file");
 			try {
 				URI[] cacheFiles = context.getCacheArchives();
 
@@ -150,6 +151,7 @@ public class DistributedGenerateCellPlan {
 		public void reduce(IntWritable key, Iterable<Text> values, Context context)
 				throws IOException, InterruptedException {
 			for (int i = 0; i < Math.pow(di_numBuckets, num_dims); i++) {
+				System.out.println("i = " + i);
 				dealEachPartition(i);
 			}
 

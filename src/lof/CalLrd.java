@@ -83,6 +83,7 @@ public class CalLrd {
 				for (int i = 0; i < whosePar.length; i++) {
 					int tempid = Integer.valueOf(whosePar[i]);
 					interKey.set(tempid);
+					interValue.set(nid + "," + kdist);
 					interValue.set(nid + ",S," + kdist);
 					context.write(interKey, interValue);
 				}

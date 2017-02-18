@@ -74,6 +74,8 @@ public class DistributeCalSupportCellsOPT {
 		// private static double maxOverlaps = 0;
 		private static int maxLimitSupporting;
 
+		private static int countExceedPartitions = 0;
+
 		/**
 		 * format of each line: key value(id,partition_plan,extand area)
 		 * 
@@ -153,15 +155,19 @@ public class DistributeCalSupportCellsOPT {
 		public void reduce(IntWritable key, Iterable<Text> values, Context context)
 				throws IOException, InterruptedException {
 			for (int i = 0; i < Math.pow(di_numBuckets, num_dims); i++) {
+				System.out.println("i = " + i);
 				dealEachPartition(i);
 			}
 
 			for (int i = 0; i < cell_store.length; i++) {
+				System.out.println("i = " + i);
 				if (cell_store[i].core_partition_id >= 0)
 					context.write(NullWritable.get(), new Text(cell_store[i].printCellStoreWithSupport()));
 				else
 					System.out.println("Cannot find core partition for this cell:" + i);
 			}
+			System.out.println("Total Exceed Partitions: " + countExceedPartitions);
+
 		}
 
 		public void dealEachPartition(int indexOfPartition) {
@@ -212,10 +218,16 @@ public class DistributeCalSupportCellsOPT {
 
 			// assign supporitng cells(dim *2 parts)
 			int[] supportCellsSize = new int[num_dims * 2];
+			boolean flagExceed = false;
 			for (int i = num_dims * 2; i < num_dims * 4; i++) {
-				if (partitionSize[i] >= maxLimitSupporting)
+				if (partitionSize[i] >= maxLimitSupporting) {
+					System.out.println("Exceed max limit: " + partitionSize[i]);
+					flagExceed = true;
 					partitionSize[i] = maxLimitSupporting;
+				}
 			}
+			if (flagExceed)
+				countExceedPartitions++;
 			for (int i = 0; i < num_dims * 2; i++) {
 				supportCellsSize[i] = (int) (Math.ceil(partitionSize[i + num_dims * 2] / smallRange));
 			}
@@ -289,7 +301,7 @@ public class DistributeCalSupportCellsOPT {
 					finalSupportList.addAll(newList);
 				} // end dealing with the second item
 			}
-//			System.out.println("Size:" + finalSupportList.size());
+			// System.out.println("Size:" + finalSupportList.size());
 			for (int i = 0; i < finalSupportList.size(); i++) {
 				// System.out.println(finalSupportList.get(i));
 				int cellId = CellStore.ComputeCellStoreId(

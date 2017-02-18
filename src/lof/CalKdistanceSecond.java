@@ -139,8 +139,7 @@ public class CalKdistanceSecond {
 							currentReader.close();
 							currentStream.close();
 						} else if (!stats[i].isDirectory() && stats[i].getPath().toString().contains("part")) {
-							// System.out.println("Reading cells for partitions
-							// from " + stats[i].getPath().toString());
+							System.out.println("Reading cells for partitions from " + stats[i].getPath().toString());
 							FSDataInputStream currentStream;
 							BufferedReader currentReader;
 							currentStream = fs.open(stats[i].getPath());
@@ -388,9 +387,10 @@ public class CalKdistanceSecond {
 			boolean moreSupporting = true;
 			for (Text value : values) {
 				String[] splitStrInput = value.toString().split(SQConfig.sepStrForRecord);
-				if ((splitStrInput.length == (2 + num_dims)) && moreSupporting) {
+				if ((splitStrInput.length == (2 + num_dims))) {
 					MetricObject mo = parseSupportObject(key.get(), value.toString());
-					sortedData.add(mo);
+					if(moreSupporting)
+						sortedData.add(mo);
 					countSupporting++;
 					if (countSupporting >= 8000000) {
 						moreSupporting = false;
@@ -416,7 +416,9 @@ public class CalKdistanceSecond {
 									+ whoseSupport + SQConfig.sepStrForRecord + knnsDetail));
 				}
 			} // end for collect data
-
+			if(moreSupporting == false){
+				System.out.println("Partitions larger than 800w:" + countSupporting);
+			}
 			// if no data left in this partition, return
 			if (sortedData.size() == 0)
 				return;
