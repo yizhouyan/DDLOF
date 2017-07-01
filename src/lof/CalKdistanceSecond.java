@@ -81,8 +81,6 @@ public class CalKdistanceSecond {
 
 		private static int K;
 
-		private static int maxLimitSupporting;
-
 		protected void setup(Context context) throws IOException, InterruptedException {
 			Configuration conf = context.getConfiguration();
 			/** get configuration from file */
@@ -96,7 +94,6 @@ public class CalKdistanceSecond {
 			di_numBuckets = conf.getInt(SQConfig.strNumOfPartitions, 2);
 
 			partition_store = new float[(int) Math.pow(di_numBuckets, num_dims)][num_dims * 4];
-			maxLimitSupporting = conf.getInt(SQConfig.strMaxLimitSupportingArea, 5000);
 			K = Integer.valueOf(conf.get(SQConfig.strK, "1"));
 			/** parse files in the cache */
 			try {
@@ -130,11 +127,6 @@ public class CalKdistanceSecond {
 									// - 1] + ",");
 								}
 								// System.out.println();
-								for (int j = num_dims * 2; j < num_dims * 4; j++) {
-									if (partition_store[tempid][j] >= maxLimitSupporting)
-										partition_store[tempid][j] = maxLimitSupporting;
-								}
-
 							}
 							currentReader.close();
 							currentStream.close();
